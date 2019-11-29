@@ -60,10 +60,10 @@ class GPS(plugins.Plugin):
             lon_pos = (112, 49)
             alt_pos = (87, 63)
         elif ui.is_waveshare27inch():
-            # testing position on waveshare2.7 Inch           
-            lat_pos = (127, 75)
-            lon_pos = (122, 84)
-            alt_pos = (127, 94)
+            # Tested value, dosen't overlap with memtemp plugin           
+            lat_pos = (5, 130)
+            lon_pos = (5, 140)
+            alt_pos = (5, 150)
          else:
             # guessed values, add tested ones if you can
             lat_pos = (127, 51)
