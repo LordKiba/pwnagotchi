@@ -59,11 +59,16 @@ class GPS(plugins.Plugin):
             lat_pos = (112, 30)
             lon_pos = (112, 49)
             alt_pos = (87, 63)
-        else:
+        elif ui.is_waveshare27inch():
+            # testing position on waveshare2.7 Inch           
+            lat_pos = (127, 75)
+            lon_pos = (122, 84)
+            alt_pos = (127, 94)
+         else:
             # guessed values, add tested ones if you can
             lat_pos = (127, 51)
             lon_pos = (127, 56)
-            alt_pos = (102, 71)
+            alt_pos = (127, 71)
 
         label_spacing = 0
 
