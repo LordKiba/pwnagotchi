@@ -49,14 +49,23 @@ class Display(View):
     def is_lcdhat(self):
         return self._implementation.name == 'lcdhat'
 
-    def is_dfrobot(self):
-        return self._implementation.name == 'dfrobot'
+    def is_dfrobot_v1(self):
+        return self._implementation.name == 'dfrobot_v1'
+
+    def is_dfrobot_v2(self):
+        return self._implementation.name == 'dfrobot_v2'
+
+    def is_waveshare144lcd(self):
+        return self._implementation.name == 'waveshare144lcd'
 
     def is_waveshare154inch(self):
         return self._implementation.name == 'waveshare154inch'
 
     def is_waveshare213d(self):
         return self._implementation.name == 'waveshare213d'
+
+    def is_waveshare213bc(self):
+        return self._implementation.name == 'waveshare213bc'
 
     def is_spotpear24inch(self):
         return self._implementation.name == 'spotpear24inch'

@@ -17,3 +17,13 @@ dist
 pwnagotchi.egg-info
 *backup*.tgz
 *backup*.gz
+.vscode
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/

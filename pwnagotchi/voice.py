@@ -1,6 +1,6 @@
-import random
 import gettext
 import os
+import random
 
 
 class Voice:
@@ -157,11 +157,17 @@ class Voice:
         return self._('You have {count} new message{plural}!').format(count=count, plural=s)
 
     def on_rebooting(self):
-        return self._("Ops, something went wrong ... Rebooting ...")
+        return self._("Oops, something went wrong ... Rebooting ...")
+
+    def on_uploading(self, to):
+        return self._("Uploading data to {to} ...").format(to=to)
 
     def on_last_session_data(self, last_session):
         status = self._('Kicked {num} stations\n').format(num=last_session.deauthed)
-        status += self._('Made {num} new friends\n').format(num=last_session.associated)
+        if last_session.associated > 999:
+            status += self._('Made >999 new friends\n')
+        else:
+            status += self._('Made {num} new friends\n').format(num=last_session.associated)
         status += self._('Got {num} handshakes\n').format(num=last_session.handshakes)
         if last_session.peers == 1:
             status += self._('Met 1 peer')

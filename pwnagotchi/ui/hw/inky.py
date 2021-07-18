@@ -10,7 +10,7 @@ class Inky(DisplayImpl):
         self._display = None
 
     def layout(self):
-        fonts.setup(10, 8, 10, 28)
+        fonts.setup(10, 8, 10, 28, 25, 9)
         self._layout['width'] = 212
         self._layout['height'] = 104
         self._layout['face'] = (0, 37)
@@ -26,7 +26,7 @@ class Inky(DisplayImpl):
         self._layout['mode'] = (187, 93)
         self._layout['status'] = {
             'pos': (102, 18),
-            'font': fonts.Small,
+            'font': fonts.status_font(fonts.Small),
             'max': 20
         }
         return self._layout
@@ -42,6 +42,12 @@ class Inky(DisplayImpl):
             from pwnagotchi.ui.hw.libs.inkyphat.inkyphatfast import InkyPHATFast
             self._display = InkyPHATFast('black')
             self._display.set_border(InkyPHATFast.BLACK)
+        elif self.config['color'] == 'auto':
+            from inky.auto import auto
+            self._display = auto()
+            self._display.set_border(self._display.BLACK)
+            self._layout['width'] = self._display.WIDTH
+            self._layout['height'] = self._display.HEIGHT
         else:
             from inky import InkyPHAT
             self._display = InkyPHAT(self.config['color'])

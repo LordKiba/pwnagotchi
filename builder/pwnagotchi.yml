@@ -33,12 +33,13 @@
         - bluetooth.service
         - triggerhappy.service
         - ifup@wlan0.service
+        - dnsmasq.service
     packages:
       bettercap:
-        url: "https://github.com/bettercap/bettercap/releases/download/v2.26.1/bettercap_linux_armhf_v2.26.1.zip"
+        url: "https://github.com/bettercap/bettercap/releases/download/v2.31.0/bettercap_linux_armhf_v2.31.0.zip"
         ui: "https://github.com/bettercap/ui/releases/download/v1.3.0/ui.zip"
       pwngrid:
-        url: "https://github.com/evilsocket/pwngrid/releases/download/v1.10.1/pwngrid_linux_armhf_v1.10.1.zip"
+        url: "https://github.com/evilsocket/pwngrid/releases/download/v1.10.3/pwngrid_linux_armhf_v1.10.3.zip"
       apt:
         hold:
           - firmware-atheros
@@ -47,12 +48,13 @@
           - firmware-misc-nonfree
           - firmware-realtek
         remove:
-          - rasberrypi-net-mods
+          - raspberrypi-net-mods
           - dhcpcd5
           - triggerhappy
           - wpa_supplicant
           - nfs-common
         install:
+          - rsync
           - vim
           - screen
           - golang
@@ -100,9 +102,9 @@
           - bc
           - fonts-freefont-ttf
           - fbi
-          - python3-flask
-          - python3-flask-cors
-          - python3-flaskext.wtf
+          - fonts-ipaexfont-gothic
+          - cryptsetup
+          - dnsmasq
 
   tasks:
   - name: change hostname
@@ -177,7 +179,7 @@
       chdir: /usr/local/src/gratis
       target: rpi
       params:
-        EPD_IO: epd_io.h
+        EPD_IO: epd_io_free_uart.h
         PANEL_VERSION: 'V231_G2'
     when: gratisgit.changed
 
@@ -186,7 +188,7 @@
       chdir: /usr/local/src/gratis
       target: rpi-install
       params:
-        EPD_IO: epd_io.h
+        EPD_IO: epd_io_free_uart.h
         PANEL_VERSION: 'V231_G2'
     when: gratisgit.changed
 
@@ -216,9 +218,19 @@
       dest: /usr/local/src/pwnagotchi
     register: pwnagotchigit
 
+  - name: create /usr/local/share/pwnagotchi/ folder
+    file:
+      path: /usr/local/share/pwnagotchi/
+      state: directory
+
+  - name: clone pwnagotchi plugins repository
+    git:
+      repo: https://github.com/evilsocket/pwnagotchi-plugins-contrib.git
+      dest: /usr/local/share/pwnagotchi/availaible-plugins
+
   - name: fetch pwnagotchi version
     set_fact:
-      pwnagotchi_version: "{{ lookup('file', '/usr/local/src/pwnagotchi/pwnagotchi/__init__.py') | replace('\n', ' ') | regex_replace('.*version.*=.*''([0-9]+\\.[0-9]+\\.[0-9]+[A-Za-z0-9]*)''.*', '\\1') }}"
+      pwnagotchi_version: "{{ lookup('file', '/usr/local/src/pwnagotchi/pwnagotchi/_version.py') | regex_replace('.*__version__.*=.*''([0-9]+\\.[0-9]+\\.[0-9]+[A-Za-z0-9]*)''.*', '\\1') }}"
 
   - name: pwnagotchi version found
     debug:
@@ -228,17 +240,17 @@
     command: "python3 setup.py sdist bdist_wheel"
     args:
       chdir: /usr/local/src/pwnagotchi
-    when: (pwnagotchigit.changed) or (pip_packages['pwnagotchi'] is undefined) or (pip_packages['pwnagotchi'] != pwnagotchi.version)
+    when: (pwnagotchigit.changed) or (pip_packages['pwnagotchi'] is undefined) or (pip_packages['pwnagotchi'] != pwnagotchi_version)
 
   - name: install opencv-python
     pip:
-      name: "https://www.piwheels.hostedpi.com/simple/opencv-python/opencv_python-3.4.3.18-cp37-cp37m-linux_armv6l.whl"
+      name: "https://www.piwheels.org/simple/opencv-python/opencv_python-3.4.3.18-cp37-cp37m-linux_armv6l.whl"
       extra_args: "--no-deps --no-cache-dir --platform=linux_armv6l --only-binary=:all: --target={{ pip_target.stdout }}"
     when: (pip_packages['opencv-python'] is undefined) or (pip_packages['opencv-python'] != '3.4.3.18')
 
   - name: install tensorflow
     pip:
-      name: "https://www.piwheels.hostedpi.com/simple/tensorflow/tensorflow-1.13.1-cp37-none-linux_armv6l.whl"
+      name: "https://www.piwheels.org/simple/tensorflow/tensorflow-1.13.1-cp37-none-linux_armv6l.whl"
       extra_args: "--no-deps --no-cache-dir --platform=linux_armv6l --only-binary=:all: --target={{ pip_target.stdout }}"
     when: (pip_packages['tensorflow'] is undefined) or (pip_packages['tensorflow'] != '1.13.1')
 
@@ -246,7 +258,7 @@
     pip:
       name: "{{ lookup('fileglob', '/usr/local/src/pwnagotchi/dist/pwnagotchi*.whl') }}"
       extra_args: "--no-cache-dir"
-    when: (pwnagotchigit.changed) or (pip_packages['pwnagotchi'] is undefined) or (pip_packages['pwnagotchi'] != pwnagotchi.version)
+    when: (pwnagotchigit.changed) or (pip_packages['pwnagotchi'] is undefined) or (pip_packages['pwnagotchi'] != pwnagotchi_version)
 
   - name: download and install pwngrid
     unarchive:
@@ -300,21 +312,17 @@
 
   - name: check if user configuration exists
     stat:
-      path: /etc/pwnagotchi/config.yml
+      path: /etc/pwnagotchi/config.toml
     register: user_config
 
-  - name: create /etc/pwnagotchi/config.yml
+  - name: create /etc/pwnagotchi/config.toml
     copy:
-      dest: /etc/pwnagotchi/config.yml
+      dest: /etc/pwnagotchi/config.toml
       content: |
-        # Add your configuration overrides on this file any configuration changes done to default.yml will be lost!
+        # Add your configuration overrides on this file any configuration changes done to default.toml will be lost!
         # Example:
-        #
-        # ui:
-        #   display:
-        #     type: 'inkyphat'
-        #     color: 'black'
-        #
+        # ui.display.enabled = true
+        # ui.display.type = "waveshare_2"
     when: not user_config.stat.exists
 
   - name: enable ssh on boot
@@ -361,15 +369,15 @@
         Hi! I'm a pwnagotchi, please take good care of me!
         Here are some basic things you need to know to raise me properly!
 
-        If you want to change my configuration, use /etc/pwnagotchi/config.yml
+        If you want to change my configuration, use /etc/pwnagotchi/config.toml
 
-        All the configuration options can be found on /etc/pwnagotchi/default.yml,
+        All the configuration options can be found on /etc/pwnagotchi/default.toml,
         but don't change this file because I will recreate it every time I'm restarted!
 
         I'm managed by systemd. Here are some basic commands.
 
         If you want to know what I'm doing, you can check my logs with the command
-        journalctl -fu pwnagotchi
+        tail -f /var/log/pwnagotchi.log
 
         If you want to know if I'm running, you can use
         systemctl status pwnagotchi

@@ -1,17 +1,122 @@
-from datetime import datetime
-from enum import Enum
+
 import logging
 import glob
 import os
-import re
 import time
 import subprocess
-import yaml
+
 import json
 import shutil
-import gzip
+import toml
+import sys
+import re
 
-import pwnagotchi
+from toml.encoder import TomlEncoder, _dump_str
+from zipfile import ZipFile
+from datetime import datetime
+from enum import Enum
+
+
+class DottedTomlEncoder(TomlEncoder):
+    """
+    Dumps the toml into the dotted-key format
+    """
+
+    def __init__(self, _dict=dict):
+        super(DottedTomlEncoder, self).__init__(_dict)
+
+    def dump_list(self, v):
+        retval = "["
+        # 1 line if its just 1 item; therefore no newline
+        if len(v) > 1:
+            retval += "\n"
+        for u in v:
+            retval += " " + str(self.dump_value(u)) + ",\n"
+        # 1 line if its just 1 item; remove newline
+        if len(v) <= 1:
+            retval = retval.rstrip("\n")
+        retval += "]"
+        return retval
+
+    def dump_sections(self, o, sup):
+        retstr = ""
+        pre = ""
+
+        if sup:
+            pre = sup + "."
+
+        for section, value in o.items():
+            section = str(section)
+            qsection = section
+            if not re.match(r'^[A-Za-z0-9_-]+$', section):
+                qsection = _dump_str(section)
+            if value is not None:
+                if isinstance(value, dict):
+                    toadd, _ = self.dump_sections(value, pre + qsection)
+                    retstr += toadd
+                    # separte sections
+                    if not retstr.endswith('\n\n'):
+                        retstr += '\n'
+                else:
+                    retstr += (pre + qsection + " = " +
+                                str(self.dump_value(value)) + '\n')
+        return (retstr, self._dict())
+
+
+def parse_version(version):
+    """
+    Converts a version str to tuple, so that versions can be compared
+    """
+    return tuple(version.split('.'))
+
+
+def remove_whitelisted(list_of_handshakes, list_of_whitelisted_strings, valid_on_error=True):
+    """
+    Removes a given list of whitelisted handshakes from a path list
+    """
+    filtered = list()
+    def normalize(name):
+        """
+        Only allow alpha/nums
+        """
+        return str.lower(''.join(c for c in name if c.isalnum()))
+
+    for handshake in list_of_handshakes:
+        try:
+            normalized_handshake = normalize(os.path.basename(handshake).rstrip('.pcap'))
+            for whitelist in list_of_whitelisted_strings:
+                normalized_whitelist = normalize(whitelist)
+                if normalized_whitelist in normalized_handshake:
+                    break
+            else:
+                filtered.append(handshake)
+        except Exception:
+            if valid_on_error:
+                filtered.append(handshake)
+    return filtered
+
+
+
+def download_file(url, destination, chunk_size=128):
+    import requests
+    resp = requests.get(url)
+    resp.raise_for_status()
+
+    with open(destination, 'wb') as fd:
+        for chunk in resp.iter_content(chunk_size):
+            fd.write(chunk)
+
+def unzip(file, destination, strip_dirs=0):
+    os.makedirs(destination, exist_ok=True)
+    with ZipFile(file, 'r') as zip:
+        if strip_dirs:
+            for info in zip.infolist():
+                new_filename = info.filename.split('/', maxsplit=strip_dirs)[strip_dirs]
+                if new_filename:
+                    info.filename = new_filename
+                    zip.extract(info, destination)
+        else:
+            zip.extractall(destination)
 
 
 # https://stackoverflow.com/questions/823196/yaml-merge-in-python
@@ -24,21 +129,47 @@ def merge_config(user, default):
                 user[k] = merge_config(user[k], v)
     return user
 
+def keys_to_str(data):
+    if isinstance(data,list):
+        converted_list = list()
+        for item in data:
+            if isinstance(item,list) or isinstance(item,dict):
+                converted_list.append(keys_to_str(item))
+            else:
+                converted_list.append(item)
+        return converted_list
+
+    converted_dict = dict()
+    for key, value in data.items():
+        if isinstance(value, list) or isinstance(value, dict):
+            converted_dict[str(key)] = keys_to_str(value)
+        else:
+            converted_dict[str(key)] = value
+
+    return converted_dict
+
+def save_config(config, target):
+    with open(target, 'wt') as fp:
+        fp.write(toml.dumps(config, encoder=DottedTomlEncoder()))
+    return True
 
 def load_config(args):
     default_config_path = os.path.dirname(args.config)
     if not os.path.exists(default_config_path):
         os.makedirs(default_config_path)
 
-    ref_defaults_file = os.path.join(os.path.dirname(pwnagotchi.__file__), 'defaults.yml')
+    import pwnagotchi
+    ref_defaults_file = os.path.join(os.path.dirname(pwnagotchi.__file__), 'defaults.toml')
     ref_defaults_data = None
 
     # check for a config.yml file on /boot/
-    if os.path.exists("/boot/config.yml"):
-        # logging not configured here yet
-        print("installing /boot/config.yml to %s ...", args.user_config)
-        # https://stackoverflow.com/questions/42392600/oserror-errno-18-invalid-cross-device-link
-        shutil.move("/boot/config.yml", args.user_config)
+    for boot_conf in ['/boot/config.yml', '/boot/config.toml']:
+        if os.path.exists(boot_conf):
+            # logging not configured here yet
+            print("installing %s to %s ...", boot_conf, args.user_config)
+            # https://stackoverflow.com/questions/42392600/oserror-errno-18-invalid-cross-device-link
+            shutil.move(boot_conf, args.user_config)
+            break
 
     # check for an entire pwnagotchi folder on /boot/
     if os.path.isdir('/boot/pwnagotchi'):
@@ -52,6 +183,7 @@ def load_config(args):
         shutil.copy(ref_defaults_file, args.config)
     else:
         # check if the user messed with the defaults
+
         with open(ref_defaults_file) as fp:
             ref_defaults_data = fp.read()
 
@@ -64,19 +196,41 @@ def load_config(args):
 
     # load the defaults
     with open(args.config) as fp:
-        config = yaml.safe_load(fp)
+        config = toml.load(fp)
 
     # load the user config
     try:
-        if os.path.exists(args.user_config):
-            with open(args.user_config) as fp:
-                user_config = yaml.safe_load(fp)
-                # if the file is empty, safe_load will return None and merge_config will boom.
-                if user_config:
-                    config = merge_config(user_config, config)
-    except yaml.YAMLError as ex:
-        print("There was an error processing the configuration file:\n%s " % ex)
-        exit(1)
+        user_config = None
+        # migrate
+        yaml_name = args.user_config.replace('.toml', '.yml')
+        if not os.path.exists(args.user_config) and os.path.exists(yaml_name):
+            # no toml found; convert yaml
+            logging.info('Old yaml-config found. Converting to toml...')
+            with open(args.user_config, 'w') as toml_file, open(yaml_name) as yaml_file:
+                import yaml
+                user_config = yaml.safe_load(yaml_file)
+                # convert int/float keys to str
+                user_config = keys_to_str(user_config)
+                # convert to toml but use loaded yaml
+                toml.dump(user_config, toml_file)
+        elif os.path.exists(args.user_config):
+            with open(args.user_config) as toml_file:
+                user_config = toml.load(toml_file)
+
+        if user_config:
+            config = merge_config(user_config, config)
+    except Exception as ex:
+        logging.error("There was an error processing the configuration file:\n%s ",ex)
+        sys.exit(1)
+
+    # dropins
+    dropin = config['main']['confd']
+    if dropin and os.path.isdir(dropin):
+        dropin += '*.toml' if dropin.endswith('/') else '/*.toml' # only toml here; yaml is no more
+        for conf in glob.glob(dropin):
+            with open(conf) as toml_file:
+                additional_config = toml.load(toml_file)
+                config = merge_config(additional_config, config)
 
     # the very first step is to normalize the display name so we don't need dozens of if/elif around
     if config['ui']['display']['type'] in ('inky', 'inkyphat'):
@@ -103,111 +257,32 @@ def load_config(args):
     elif config['ui']['display']['type'] in ('lcdhat',):
         config['ui']['display']['type'] = 'lcdhat'
 
-    elif config['ui']['display']['type'] in ('dfrobot', 'df'):
-        config['ui']['display']['type'] = 'dfrobot'
+    elif config['ui']['display']['type'] in ('dfrobot_1', 'df1'):
+        config['ui']['display']['type'] = 'dfrobot_1'
+
+    elif config['ui']['display']['type'] in ('dfrobot_2', 'df2'):
+        config['ui']['display']['type'] = 'dfrobot_2'
 
     elif config['ui']['display']['type'] in ('ws_154inch', 'ws154inch', 'waveshare_154inch', 'waveshare154inch'):
         config['ui']['display']['type'] = 'waveshare154inch'
 
+    elif config['ui']['display']['type'] in ('waveshare144lcd', 'ws_144inch', 'ws144inch', 'waveshare_144inch', 'waveshare144inch'):
+        config['ui']['display']['type'] = 'waveshare144lcd'
+
     elif config['ui']['display']['type'] in ('ws_213d', 'ws213d', 'waveshare_213d', 'waveshare213d'):
         config['ui']['display']['type'] = 'waveshare213d'
+
+    elif config['ui']['display']['type'] in ('ws_213bc', 'ws213bc', 'waveshare_213bc', 'waveshare213bc'):
+        config['ui']['display']['type'] = 'waveshare213bc'
 
     elif config['ui']['display']['type'] in ('spotpear24inch'):
         config['ui']['display']['type'] = 'spotpear24inch'
 
     else:
         print("unsupported display type %s" % config['ui']['display']['type'])
-        exit(1)
+        sys.exit(1)
 
     return config
-
-
-def parse_max_size(s):
-    parts = re.findall(r'(^\d+)([bBkKmMgG]?)', s)
-    if len(parts) != 1 or len(parts[0]) != 2:
-        raise Exception("can't parse %s as a max size" % s)
-
-    num, unit = parts[0]
-    num = int(num)
-    unit = unit.lower()
-
-    if unit == 'k':
-        return num * 1024
-    elif unit == 'm':
-        return num * 1024 * 1024
-    elif unit == 'g':
-        return num * 1024 * 1024 * 1024
-    else:
-        return num
-
-
-def do_rotate(filename, stats, cfg):
-    base_path = os.path.dirname(filename)
-    name = os.path.splitext(os.path.basename(filename))[0]
-    archive_filename = os.path.join(base_path, "%s.gz" % name)
-    counter = 2
-
-    while os.path.exists(archive_filename):
-        archive_filename = os.path.join(base_path, "%s-%d.gz" % (name, counter))
-        counter += 1
-
-    log_filename = archive_filename.replace('gz', 'log')
-
-    print("%s is %d bytes big, rotating to %s ..." % (filename, stats.st_size, log_filename))
-
-    shutil.move(filename, log_filename)
-
-    print("compressing to %s ..." % archive_filename)
-
-    with open(log_filename, 'rb') as src:
-        with gzip.open(archive_filename, 'wb') as dst:
-            dst.writelines(src)
-
-
-def log_rotation(filename, cfg):
-    rotation = cfg['rotation']
-    if not rotation['enabled']:
-        return
-    elif not os.path.isfile(filename):
-        return
-
-    stats = os.stat(filename)
-    # specify a maximum size to rotate ( format is 10/10B, 10K, 10M 10G )
-    if rotation['size']:
-        max_size = parse_max_size(rotation['size'])
-        if stats.st_size >= max_size:
-            do_rotate(filename, stats, cfg)
-    else:
-        raise Exception("log rotation is enabled but log.rotation.size was not specified")
-
-
-def setup_logging(args, config):
-    cfg = config['main']['log']
-    filename = cfg['path']
-
-    formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s")
-    root = logging.getLogger()
-
-    root.setLevel(logging.DEBUG if args.debug else logging.INFO)
-
-    if filename:
-        # since python default log rotation might break session data in different files,
-        # we need to do log rotation ourselves
-        log_rotation(filename, cfg)
-
-        file_handler = logging.FileHandler(filename)
-        file_handler.setFormatter(formatter)
-        root.addHandler(file_handler)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    root.addHandler(console_handler)
-
-    # https://stackoverflow.com/questions/24344045/how-can-i-completely-remove-any-logging-from-requests-module-in-python?noredirect=1&lq=1
-    logging.getLogger("urllib3").propagate = False
-    requests_log = logging.getLogger("requests")
-    requests_log.addHandler(logging.NullHandler())
-    requests_log.propagate = False
 
 
 def secs_to_hhmmss(secs):
@@ -237,7 +312,7 @@ def led(on=True):
 
 
 def blink(times=1, delay=0.3):
-    for t in range(0, times):
+    for _ in range(0, times):
         led(True)
         time.sleep(delay)
         led(False)
@@ -258,6 +333,18 @@ class WifiInfo(Enum):
 
 class FieldNotFoundError(Exception):
     pass
+
+
+def md5(fname):
+    """
+    https://stackoverflow.com/questions/3431825/generating-an-md5-checksum-of-a-file
+    """
+    import hashlib
+    hash_md5 = hashlib.md5()
+    with open(fname, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
 
 
 def extract_from_pcap(path, fields):
@@ -342,7 +429,6 @@ def extract_from_pcap(path, fields):
 
     return results
 
-
 class StatusFile(object):
     def __init__(self, path, data_format='raw'):
         self._path = path
@@ -373,9 +459,10 @@ class StatusFile(object):
         return self._updated is not None and (datetime.now() - self._updated).days < days
 
     def update(self, data=None):
+        from pwnagotchi.fs import ensure_write
         self._updated = datetime.now()
         self.data = data
-        with open(self._path, 'w') as fp:
+        with ensure_write(self._path, 'w') as fp:
             if data is None:
                 fp.write(str(self._updated))
 

@@ -40,7 +40,7 @@ msgstr "创建密钥中, 请勿断电..."
 
 #, python-brace-format
 msgid "Hey, channel {channel} is free! Your AP will say thanks."
-msgstr ""
+msgstr "嘿，频道{channel}是免费的！你的AP会说谢谢。"
 
 msgid "I'm bored ..."
 msgstr "我无聊了..."
@@ -84,7 +84,7 @@ msgstr "你好{name}!很高兴认识你."
 
 #, python-brace-format
 msgid "Unit {name} is nearby!"
-msgstr ""
+msgstr "小队{name}就在附近！"
 
 #, python-brace-format
 msgid "Uhm ... goodbye {name}"
@@ -177,7 +177,7 @@ msgstr "太酷了, 我们抓到了{num}新的猎物{plural}!"
 msgid "You have {count} new message{plural}!"
 msgstr "主人，有{count}新消息{plural}!"
 
-msgid "Ops, something went wrong ... Rebooting ..."
+msgid "Oops, something went wrong ... Rebooting ..."
 msgstr "行动,额等等有点小问题... 重启ing ..."
 
 #, python-brace-format
@@ -193,7 +193,7 @@ msgid "Got {num} handshakes\n"
 msgstr "捕获了{num}握手包\n"
 
 msgid "Met 1 peer"
-msgstr ""
+msgstr "有{num}同龄人"
 
 #, python-brace-format
 msgid "Met {num} peers"

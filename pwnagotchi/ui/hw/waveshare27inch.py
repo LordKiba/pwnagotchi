@@ -6,11 +6,11 @@ from pwnagotchi.ui.hw.base import DisplayImpl
 
 class Waveshare27inch(DisplayImpl):
     def __init__(self, config):
-        super(Waveshare27inch, self).__init__(config, 'waveshare_2_7inch')
+        super(Waveshare27inch, self).__init__(config, 'waveshare27inch')
         self._display = None
 
     def layout(self):
-        fonts.setup(10, 9, 10, 35)
+        fonts.setup(10, 9, 10, 35, 25, 9)
         self._layout['width'] = 264
         self._layout['height'] = 176
         self._layout['face'] = (66, 27)
@@ -26,7 +26,7 @@ class Waveshare27inch(DisplayImpl):
         self._layout['mode'] = (239, 163)
         self._layout['status'] = {
             'pos': (38, 93),
-            'font': fonts.Medium,
+            'font': fonts.status_font(fonts.Medium),
             'max': 40
         }
         return self._layout

@@ -6,11 +6,11 @@ import requests
 import platform
 import shutil
 import glob
-import pkg_resources
+from threading import Lock
 
 import pwnagotchi
 import pwnagotchi.plugins as plugins
-from pwnagotchi.utils import StatusFile
+from pwnagotchi.utils import StatusFile, parse_version as version_to_tuple
 
 
 def check(version, repo, native=True):
@@ -29,8 +29,8 @@ def check(version, repo, native=True):
     info['available'] = latest_ver = latest['tag_name'].replace('v', '')
     is_arm = info['arch'].startswith('arm')
 
-    local = pkg_resources.parse_version(info['current'])
-    remote = pkg_resources.parse_version(latest_ver)
+    local = version_to_tuple(info['current'])
+    remote = version_to_tuple(latest_ver)
     if remote > local:
         if not native:
             info['url'] = "https://github.com/%s/archive/%s.zip" % (repo, latest['tag_name'])
@@ -150,69 +150,74 @@ class AutoUpdate(plugins.Plugin):
     def __init__(self):
         self.ready = False
         self.status = StatusFile('/root/.auto-update')
+        self.lock = Lock()
 
     def on_loaded(self):
-        if 'interval' not in self.options or ('interval' in self.options and self.options['interval'] is None):
+        if 'interval' not in self.options or ('interval' in self.options and not self.options['interval']):
             logging.error("[update] main.plugins.auto-update.interval is not set")
             return
         self.ready = True
         logging.info("[update] plugin loaded.")
 
     def on_internet_available(self, agent):
-        logging.debug("[update] internet connectivity is available (ready %s)" % self.ready)
-
-        if not self.ready:
+        if self.lock.locked():
             return
 
-        if self.status.newer_then_hours(self.options['interval']):
-            logging.debug("[update] last check happened less than %d hours ago" % self.options['interval'])
-            return
+        with self.lock:
+            logging.debug("[update] internet connectivity is available (ready %s)" % self.ready)
 
-        logging.info("[update] checking for updates ...")
+            if not self.ready:
+                return
 
-        display = agent.view()
-        prev_status = display.get('status')
+            if self.status.newer_then_hours(self.options['interval']):
+                logging.debug("[update] last check happened less than %d hours ago" % self.options['interval'])
+                return
 
-        try:
-            display.update(force=True, new_data={'status': 'Checking for updates ...'})
+            logging.info("[update] checking for updates ...")
 
-            to_install = []
-            to_check = [
-                ('bettercap/bettercap', parse_version('bettercap -version'), True, 'bettercap'),
-                ('evilsocket/pwngrid', parse_version('pwngrid -version'), True, 'pwngrid-peer'),
-                ('evilsocket/pwnagotchi', pwnagotchi.version, False, 'pwnagotchi')
-            ]
+            display = agent.view()
+            prev_status = display.get('status')
 
-            for repo, local_version, is_native, svc_name in to_check:
-                info = check(local_version, repo, is_native)
-                if info['url'] is not None:
-                    logging.warning(
-                        "update for %s available (local version is '%s'): %s" % (
-                            repo, info['current'], info['url']))
-                    info['service'] = svc_name
-                    to_install.append(info)
+            try:
+                display.update(force=True, new_data={'status': 'Checking for updates ...'})
 
-            num_updates = len(to_install)
-            num_installed = 0
+                to_install = []
+                to_check = [
+                    ('bettercap/bettercap', parse_version('bettercap -version'), True, 'bettercap'),
+                    ('evilsocket/pwngrid', parse_version('pwngrid -version'), True, 'pwngrid-peer'),
+                    ('evilsocket/pwnagotchi', pwnagotchi.__version__, False, 'pwnagotchi')
+                ]
 
-            if num_updates > 0:
-                if self.options['install']:
-                    for update in to_install:
-                        plugins.on('updating')
-                        if install(display, update):
-                            num_installed += 1
-                else:
-                    prev_status = '%d new update%c available!' % (num_updates, 's' if num_updates > 1 else '')
+                for repo, local_version, is_native, svc_name in to_check:
+                    info = check(local_version, repo, is_native)
+                    if info['url'] is not None:
+                        logging.warning(
+                            "update for %s available (local version is '%s'): %s" % (
+                                repo, info['current'], info['url']))
+                        info['service'] = svc_name
+                        to_install.append(info)
 
-            logging.info("[update] done")
+                num_updates = len(to_install)
+                num_installed = 0
 
-            self.status.update()
+                if num_updates > 0:
+                    if self.options['install']:
+                        for update in to_install:
+                            plugins.on('updating')
+                            if install(display, update):
+                                num_installed += 1
+                    else:
+                        prev_status = '%d new update%c available!' % (num_updates, 's' if num_updates > 1 else '')
 
-            if num_installed > 0:
-                display.update(force=True, new_data={'status': 'Rebooting ...'})
-                pwnagotchi.reboot()
+                logging.info("[update] done")
 
-        except Exception as e:
-            logging.error("[update] %s" % e)
+                self.status.update()
 
-        display.update(force=True, new_data={'status': prev_status if prev_status is not None else ''})
+                if num_installed > 0:
+                    display.update(force=True, new_data={'status': 'Rebooting ...'})
+                    pwnagotchi.reboot()
+
+            except Exception as e:
+                logging.error("[update] %s" % e)
+
+            display.update(force=True, new_data={'status': prev_status if prev_status is not None else ''})
